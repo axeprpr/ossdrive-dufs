@@ -26,4 +26,4 @@ docker run -d --name ossdrive-dufs -p 5000:3000 \
 
 ## GitHub Actions
 
-推送到 `main` 会自动编译 Linux `amd64`/`arm64` 二进制并构建 Docker 镜像（默认不推送镜像）。创建 `v*` 标签会发布二进制 Release。无需本地安装 Rust、Go 或 Node.js。
+推送到 `main` 会自动编译 Rust Dufs 的 Linux `amd64`/`arm64` 二进制并构建 Docker 镜像。创建 `v*` 标签会发布二进制 Release。无需本地安装 Rust 或 Node.js。

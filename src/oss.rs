@@ -39,6 +39,7 @@ impl OssServer {
         if req.method() == Method::OPTIONS { return Ok(response(StatusCode::NO_CONTENT, Bytes::new())); }
         let path = req.uri().path().trim_matches('/');
         if path == "health" || path == "__dufs__/health" { return Ok(json_response(StatusCode::OK, br#"{"status":"ok"}"#)); }
+        if req.method().as_str() == "CHECKAUTH" { return Ok(if self.authorized(&req) { response(StatusCode::OK, Bytes::new()) } else { unauthorized() }); }
         if path == "api/upload-url" { if !self.authorized(&req) { return Ok(unauthorized()); }; return self.upload_url(req).await; }
         if req.method() == Method::DELETE { if !self.authorized(&req) { return Ok(unauthorized()); }; return self.delete(path).await; }
         if req.method().as_str() == "MOVE" { if !self.authorized(&req) { return Ok(unauthorized()); }; return self.move_object(path, req.headers().get("destination").and_then(|v| v.to_str().ok())).await; }
@@ -81,7 +82,7 @@ impl OssServer {
 }
 
 fn required(key: &str) -> Result<String> { std::env::var(key).map_err(|_| anyhow!("missing {}", key)) }
-fn response(status: StatusCode, body: Bytes) -> Response { Response::new(Full::new(body).map_err(|e| anyhow!(e)).boxed()) }
+fn response(status: StatusCode, body: Bytes) -> Response { let mut response=Response::new(Full::new(body).map_err(|e| anyhow!(e)).boxed()); *response.status_mut()=status; response }
 fn json_response(status: StatusCode, body: &[u8]) -> Response { let mut r=response(status,Bytes::copy_from_slice(body)); r.headers_mut().insert(header::CONTENT_TYPE,header::HeaderValue::from_static("application/json")); r }
 fn error_response(status: StatusCode, message: &str) -> Response { json_response(status,serde_json::json!({"error":message}).to_string().as_bytes()) }
 fn unauthorized() -> Response { let mut r=error_response(StatusCode::UNAUTHORIZED,"authentication required"); r.headers_mut().insert(header::WWW_AUTHENTICATE,header::HeaderValue::from_static("Basic realm=ossdrive")); r }

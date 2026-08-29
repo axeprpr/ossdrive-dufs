@@ -87,7 +87,8 @@ impl OssServer {
         let now = Utc::now();
         let date = format!("{:04}{:02}{:02}", now.year(), now.month(), now.day());
         let timestamp = format!("{}T{:02}{:02}{:02}Z", date, now.hour(), now.minute(), now.second());
-        let credential = format!("{}/{}/aliyun_v4_request", self.access_key, date);
+        let region = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-hangzhou".into());
+        let credential = format!("{}/{}/{}/oss/aliyun_v4_request", self.access_key, date, region);
         let path = if key.is_empty() { "/".to_string() } else { format!("/{}", key.split('/').map(|part| utf8_percent_encode(part, NON_ALPHANUMERIC).to_string()).collect::<Vec<_>>().join("/") ) };
         let mut q = query.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect::<BTreeMap<_, _>>();
         q.insert("x-oss-credential".into(), credential.clone());
@@ -102,10 +103,10 @@ impl OssServer {
         let payload_hash = "UNSIGNED-PAYLOAD";
         let canonical_request = format!("{}\n{}\n{}\n{}\n{}\n{}", method, path, query_string, canonical_headers, signed_headers, payload_hash);
         let hashed_request = hex::encode(Sha256::digest(canonical_request.as_bytes()));
-        let scope = format!("{}/{}/oss/aliyun_v4_request", date, self.bucket_endpoint.split('.').nth(1).unwrap_or("oss-cn-hangzhou"));
+        let scope = format!("{}/{}/oss/aliyun_v4_request", date, region);
         let string_to_sign = format!("OSS4-HMAC-SHA256\n{}\n{}\n{}", timestamp, scope, hashed_request);
         let date_key = hmac_sha256(format!("aliyun_v4{}", self.secret).as_bytes(), date.as_bytes());
-        let region_key = hmac_sha256(&date_key, self.bucket_endpoint.split('.').nth(1).unwrap_or("oss-cn-hangzhou").as_bytes());
+        let region_key = hmac_sha256(&date_key, region.as_bytes());
         let service_key = hmac_sha256(&region_key, b"oss");
         let signing_key = hmac_sha256(&service_key, b"aliyun_v4_request");
         let signature = hex::encode(hmac_sha256(&signing_key, string_to_sign.as_bytes()));

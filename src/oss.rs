@@ -44,7 +44,7 @@ impl OssServer {
     async fn handle(&self, req: Request<Incoming>) -> Result<Response> {
         if req.method() == Method::OPTIONS { return Ok(response(StatusCode::NO_CONTENT, Bytes::new())); }
         let path = req.uri().path().trim_matches('/');
-        let wants_json = req.uri().query().is_some_and(|q| q.split('&').any(|v| v == "json"));
+        let wants_json = req.uri().query().is_some_and(|q| q.split('&').any(|v| v == "json" || v.strip_prefix("json=").is_some()));
         if (req.method() == Method::GET || req.method() == Method::HEAD) && !wants_json && (path.is_empty() || req.uri().path().ends_with('/')) { return Ok(self.index_page()); }
         if (path == "index.js" || path.ends_with("/index.js") || path.contains("assets/index-") && path.ends_with(".js")) { return Ok(asset_response("application/javascript; charset=UTF-8", include_str!("../assets/index.js"))); }
         if (path == "index.css" || path.ends_with("/index.css") || path.contains("assets/index-") && path.ends_with(".css")) { return Ok(asset_response("text/css; charset=UTF-8", include_str!("../assets/index.css"))); }

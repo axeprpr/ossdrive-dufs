@@ -14,7 +14,6 @@ use std::{collections::BTreeMap, sync::Arc};
 use crate::server::Response;
 
 type HmacSha1 = Hmac<Sha1>;
-type HmacSha256 = Hmac<sha2::Sha256>;
 
 pub struct OssServer {
     client: Client,
@@ -114,7 +113,16 @@ impl OssServer {
 }
 
 fn first_env(keys: &[&str]) -> Result<String> { keys.iter().find_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty())).ok_or_else(|| anyhow!("missing {}", keys.join(" or "))) }
-fn hmac_sha256(key: &[u8], value: &[u8]) -> Vec<u8> { let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts arbitrary key length"); mac.update(value); mac.finalize().into_bytes().to_vec() }
+fn hmac_sha256(key: &[u8], value: &[u8]) -> Vec<u8> {
+    let mut block = [0u8; 64];
+    if key.len() > 64 { block[..32].copy_from_slice(&Sha256::digest(key)); } else { block[..key.len()].copy_from_slice(key); }
+    let mut inner = [0u8; 64]; let mut outer = [0u8; 64];
+    for i in 0..64 { inner[i] = block[i] ^ 0x36; outer[i] = block[i] ^ 0x5c; }
+    let mut input = inner.to_vec(); input.extend_from_slice(value);
+    let inner_hash = Sha256::digest(&input);
+    let mut output = outer.to_vec(); output.extend_from_slice(&inner_hash);
+    Sha256::digest(&output).to_vec()
+}
 fn response(status: StatusCode, body: Bytes) -> Response { let mut response=Response::new(Full::new(body).map_err(|e| anyhow!(e)).boxed()); *response.status_mut()=status; response }
 fn json_response(status: StatusCode, body: &[u8]) -> Response { let mut r=response(status,Bytes::copy_from_slice(body)); r.headers_mut().insert(header::CONTENT_TYPE,header::HeaderValue::from_static("application/json")); r }
 fn error_response(status: StatusCode, message: &str) -> Response { json_response(status,serde_json::json!({"error":message}).to_string().as_bytes()) }

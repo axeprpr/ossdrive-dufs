@@ -28,7 +28,7 @@ impl OssServer {
     pub fn from_env() -> Result<Self> {
         let endpoint = std::env::var("DUFS_OSS_ENDPOINT").or_else(|_| std::env::var("OSS_ENDPOINT")).unwrap_or_else(|_| "https://oss-cn-hangzhou.aliyuncs.com".into());
         let endpoint = endpoint.trim_end_matches('/').to_string();
-        Ok(Self { client: Client::new(), endpoint, bucket: required("DUFS_OSS_BUCKET")?, access_key: required("DUFS_OSS_ACCESS_KEY_ID")?, secret: required("DUFS_OSS_ACCESS_KEY_SECRET")?, prefix: std::env::var("DUFS_OSS_PREFIX").unwrap_or_default().trim_matches('/').to_string(), user: match (std::env::var("DUFS_USER"), std::env::var("DUFS_PASSWORD")) { (Ok(u), Ok(p)) if !u.is_empty() => Some((u,p)), _ => None } })
+        Ok(Self { client: Client::new(), endpoint, bucket: first_env(&["DUFS_OSS_BUCKET", "OSS_BUCKET"] )?, access_key: first_env(&["DUFS_OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_ID"] )?, secret: first_env(&["DUFS_OSS_ACCESS_KEY_SECRET", "OSS_ACCESS_KEY_SECRET"] )?, prefix: first_env(&["DUFS_OSS_PREFIX", "OSS_PREFIX"]).unwrap_or_default().trim_matches('/').to_string(), user: match (std::env::var("DUFS_USER"), std::env::var("DUFS_PASSWORD")) { (Ok(u), Ok(p)) if !u.is_empty() => Some((u,p)), _ => None } })
     }
 
     pub async fn call(self: Arc<Self>, req: Request<Incoming>, _addr: Option<std::net::SocketAddr>) -> Result<Response, hyper::Error> {
@@ -81,7 +81,7 @@ impl OssServer {
     fn signed_api_url(&self, method: &str, key: &str, query: &BTreeMap<&str,String>) -> Result<String> { let resource=format!("/{}/{}",self.bucket,key); let expires=(Utc::now().timestamp()+900).to_string(); let mut q=query.clone(); q.insert("OSSAccessKeyId",self.access_key.clone()); q.insert("Expires",expires); let canonical_query=q.iter().map(|(k,v)|format!("{}={}",k,utf8_percent_encode(v,NON_ALPHANUMERIC))).collect::<Vec<_>>().join("&"); let string_to_sign=format!("{}\n\n\n{}\n{}",method,q.get("Expires").unwrap(),resource); let mut mac=HmacSha1::new_from_slice(self.secret.as_bytes()).map_err(|_|anyhow!("invalid secret"))?; mac.update(string_to_sign.as_bytes()); let signature=STANDARD.encode(mac.finalize().into_bytes()); Ok(format!("{}{}?{}&Signature={}",self.endpoint,resource,canonical_query,utf8_percent_encode(&signature,NON_ALPHANUMERIC))) }
 }
 
-fn required(key: &str) -> Result<String> { std::env::var(key).map_err(|_| anyhow!("missing {}", key)) }
+fn first_env(keys: &[&str]) -> Result<String> { keys.iter().find_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty())).ok_or_else(|| anyhow!("missing {}", keys.join(" or "))) }
 fn response(status: StatusCode, body: Bytes) -> Response { let mut response=Response::new(Full::new(body).map_err(|e| anyhow!(e)).boxed()); *response.status_mut()=status; response }
 fn json_response(status: StatusCode, body: &[u8]) -> Response { let mut r=response(status,Bytes::copy_from_slice(body)); r.headers_mut().insert(header::CONTENT_TYPE,header::HeaderValue::from_static("application/json")); r }
 fn error_response(status: StatusCode, message: &str) -> Response { json_response(status,serde_json::json!({"error":message}).to_string().as_bytes()) }

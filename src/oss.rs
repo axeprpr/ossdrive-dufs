@@ -99,8 +99,8 @@ impl OssServer {
         q.insert("x-oss-additional-headers".into(), "host".into());
         let query_string = q.iter().map(|(k, v)| format!("{}={}", utf8_percent_encode(k, OSS_ENCODE_SET), utf8_percent_encode(v, OSS_ENCODE_SET))).collect::<Vec<_>>().join("&");
         let host = self.bucket_endpoint.trim_start_matches("https://").trim_start_matches("http://");
-        let signed_headers = "host";
-        let canonical_headers = format!("host:{}\n", host);
+        let signed_headers = if method == "PUT" { "content-type;host" } else { "host" };
+        let canonical_headers = if method == "PUT" { format!("content-type:application/octet-stream\nhost:{}\n", host) } else { format!("host:{}\n", host) };
         let payload_hash = "UNSIGNED-PAYLOAD";
         let canonical_request = format!("{}\n{}\n{}\n{}\n{}\n{}", method, canonical_path, query_string, canonical_headers, signed_headers, payload_hash);
         let hashed_request = hex::encode(Sha256::digest(canonical_request.as_bytes()));

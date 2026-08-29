@@ -1,7 +1,7 @@
 FROM rust:1.88-alpine AS build
 RUN apk add --no-cache musl-dev
 WORKDIR /src
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 COPY src ./src
 COPY assets ./assets
 RUN cargo build --release

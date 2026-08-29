@@ -10,7 +10,7 @@ WORKDIR /src
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=$GOPROXY
 COPY backend/go.mod ./
-RUN go mod download
+RUN go mod tidy
 COPY backend/main.go ./
 COPY --from=frontend /src/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /ossdrive .

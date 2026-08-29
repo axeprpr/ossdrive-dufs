@@ -15,6 +15,7 @@ use crate::server::Response;
 
 type HmacSha1 = Hmac<Sha1>;
 const OSS_ENCODE_SET: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`').add(b'#').add(b'?').add(b'/').add(b':').add(b'=').add(b'&').add(b'+');
+const OSS_PATH_SET: &AsciiSet = &CONTROLS.add(b' ').add(b'!').add(b'"').add(b'#').add(b'$').add(b'%').add(b'&').add(b'\'').add(b'(').add(b')').add(b'*').add(b'+').add(b',').add(b'/').add(b':').add(b';').add(b'<').add(b'=').add(b'>').add(b'?').add(b'@').add(b'[').add(b'\\').add(b']').add(b'^').add(b'`').add(b'{').add(b'|').add(b'}');
 
 pub struct OssServer {
     client: Client,
@@ -89,8 +90,9 @@ impl OssServer {
         let timestamp = format!("{}T{:02}{:02}{:02}Z", date, now.hour(), now.minute(), now.second());
         let region = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-hangzhou".into());
         let credential = format!("{}/{}/{}/oss/aliyun_v4_request", self.access_key, date, region);
-        let path = if key.is_empty() { "/".to_string() } else { format!("/{}", key.split('/').map(|part| utf8_percent_encode(part, NON_ALPHANUMERIC).to_string()).collect::<Vec<_>>().join("/") ) };
-        let canonical_path = if key.is_empty() { format!("/{}/", self.bucket) } else { format!("/{}/{}", self.bucket, key.split('/').map(|part| utf8_percent_encode(part, NON_ALPHANUMERIC).to_string()).collect::<Vec<_>>().join("/") ) };
+        let encoded_key = key.split('/').map(|part| utf8_percent_encode(part, OSS_PATH_SET).to_string()).collect::<Vec<_>>().join("/");
+        let path = if key.is_empty() { "/".to_string() } else { format!("/{}", encoded_key) };
+        let canonical_path = if key.is_empty() { format!("/{}/", self.bucket) } else { format!("/{}/{}", self.bucket, encoded_key) };
         let mut q = query.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect::<BTreeMap<_, _>>();
         q.insert("x-oss-credential".into(), credential.clone());
         q.insert("x-oss-date".into(), timestamp.clone());

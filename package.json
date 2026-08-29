@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node after-build.js",
+    "build": "node apply-patches.js && vite build && node after-build.js",
     "dufs": "vite build && node after-build.js && dufs --bind 127.0.0.1 --path-prefix /prefix/ --allow-archive --allow-search --assets dist .",
     "dufs-api": "dufs --bind 127.0.0.1 --path-prefix /prefix/ --auth admin:admin@/:rw --auth guest:guest@/ --enable-cors --allow-all .",
     "preview": "vite preview"

@@ -1,13 +1,14 @@
 use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use chrono::Utc;
+use chrono::{Datelike, Timelike, Utc};
 use hmac::{Hmac, Mac};
 use hyper::{body::Incoming, header, Method, Request, StatusCode};
 use http_body_util::{BodyExt, Full};
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use reqwest::Client;
 use sha1::Sha1;
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::server::Response;
@@ -81,10 +82,38 @@ impl OssServer {
     fn key(&self, value: &str) -> Result<String> { let value=urlencoding::decode(value)?.replace('\\', "/"); let clean=value.trim_matches('/'); if clean.is_empty() || clean.split('/').any(|p|p==".."||p.is_empty()) { return Err(anyhow!("invalid path")); } Ok(if self.prefix.is_empty(){clean.to_string()}else{format!("{}/{}",self.prefix,clean)}) }
     fn key_prefix(&self, path: &str) -> String { let raw=path.trim_matches('/'); if self.prefix.is_empty(){ if raw.is_empty(){String::new()}else{format!("{}/",raw)} }else if raw.is_empty(){format!("{}/",self.prefix)}else{format!("{}/{}/",self.prefix,raw)} }
     fn signed_url(&self, key: &str, method: &str) -> Result<String> { Ok(self.signed_api_url(method,key,&BTreeMap::new())?) }
-    fn signed_api_url(&self, method: &str, key: &str, query: &BTreeMap<&str,String>) -> Result<String> { let resource_base=format!("/{}/{}",self.bucket,key); let expires=(Utc::now().timestamp()+900).to_string(); let mut q=query.clone(); q.insert("OSSAccessKeyId",self.access_key.clone()); q.insert("Expires",expires); let query_string=q.iter().map(|(k,v)|format!("{}={}",k,utf8_percent_encode(v,NON_ALPHANUMERIC))).collect::<Vec<_>>().join("&"); let content_type=if method=="PUT" { "application/octet-stream" } else { "" }; let string_to_sign=format!("{}\n\n{}\n{}\n{}",method,content_type,q.get("Expires").unwrap(),resource_base); let mut mac=HmacSha1::new_from_slice(self.secret.as_bytes()).map_err(|_|anyhow!("invalid secret"))?; mac.update(string_to_sign.as_bytes()); let signature=STANDARD.encode(mac.finalize().into_bytes()); Ok(format!("{}{}?{}&Signature={}",self.bucket_endpoint,format!("/{}",key),query_string,utf8_percent_encode(&signature,NON_ALPHANUMERIC))) }
+    fn signed_api_url(&self, method: &str, key: &str, query: &BTreeMap<&str,String>) -> Result<String> {
+        let now = Utc::now();
+        let date = format!("{:04}{:02}{:02}", now.year(), now.month(), now.day());
+        let timestamp = format!("{}T{:02}{:02}{:02}Z", date, now.hour(), now.minute(), now.second());
+        let credential = format!("{}/{}/aliyun_v4_request", self.access_key, date);
+        let path = if key.is_empty() { "/".to_string() } else { format!("/{}", key.split('/').map(|part| utf8_percent_encode(part, NON_ALPHANUMERIC).to_string()).collect::<Vec<_>>().join("/") ) };
+        let mut q = query.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect::<BTreeMap<_, _>>();
+        q.insert("x-oss-credential".into(), credential.clone());
+        q.insert("x-oss-date".into(), timestamp.clone());
+        q.insert("x-oss-expires".into(), "900".into());
+        q.insert("x-oss-signature-version".into(), "OSS4-HMAC-SHA256".into());
+        q.insert("x-oss-additional-headers".into(), "host".into());
+        let query_string = q.iter().map(|(k, v)| format!("{}={}", utf8_percent_encode(k, NON_ALPHANUMERIC), utf8_percent_encode(v, NON_ALPHANUMERIC))).collect::<Vec<_>>().join("&");
+        let host = self.bucket_endpoint.trim_start_matches("https://").trim_start_matches("http://");
+        let signed_headers = "host";
+        let canonical_headers = format!("host:{}\n", host);
+        let payload_hash = "UNSIGNED-PAYLOAD";
+        let canonical_request = format!("{}\n{}\n{}\n{}\n{}\n{}", method, path, query_string, canonical_headers, signed_headers, payload_hash);
+        let hashed_request = hex::encode(Sha256::digest(canonical_request.as_bytes()));
+        let scope = format!("{}/{}/oss/aliyun_v4_request", date, self.bucket_endpoint.split('.').nth(1).unwrap_or("oss-cn-hangzhou"));
+        let string_to_sign = format!("OSS4-HMAC-SHA256\n{}\n{}\n{}", timestamp, scope, hashed_request);
+        let date_key = hmac_sha256(format!("aliyun_v4{}", self.secret).as_bytes(), date.as_bytes());
+        let region_key = hmac_sha256(&date_key, self.bucket_endpoint.split('.').nth(1).unwrap_or("oss-cn-hangzhou").as_bytes());
+        let service_key = hmac_sha256(&region_key, b"oss");
+        let signing_key = hmac_sha256(&service_key, b"aliyun_v4_request");
+        let signature = hex::encode(hmac_sha256(&signing_key, string_to_sign.as_bytes()));
+        Ok(format!("{}{}?{}&x-oss-signature={}", self.bucket_endpoint, path, query_string, signature))
+    }
 }
 
 fn first_env(keys: &[&str]) -> Result<String> { keys.iter().find_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty())).ok_or_else(|| anyhow!("missing {}", keys.join(" or "))) }
+fn hmac_sha256(key: &[u8], value: &[u8]) -> Vec<u8> { let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts arbitrary key length"); mac.update(value); mac.finalize().into_bytes().to_vec() }
 fn response(status: StatusCode, body: Bytes) -> Response { let mut response=Response::new(Full::new(body).map_err(|e| anyhow!(e)).boxed()); *response.status_mut()=status; response }
 fn json_response(status: StatusCode, body: &[u8]) -> Response { let mut r=response(status,Bytes::copy_from_slice(body)); r.headers_mut().insert(header::CONTENT_TYPE,header::HeaderValue::from_static("application/json")); r }
 fn error_response(status: StatusCode, message: &str) -> Response { json_response(status,serde_json::json!({"error":message}).to_string().as_bytes()) }

@@ -90,6 +90,7 @@ impl OssServer {
         let region = std::env::var("OSS_REGION").unwrap_or_else(|_| "cn-hangzhou".into());
         let credential = format!("{}/{}/{}/oss/aliyun_v4_request", self.access_key, date, region);
         let path = if key.is_empty() { "/".to_string() } else { format!("/{}", key.split('/').map(|part| utf8_percent_encode(part, NON_ALPHANUMERIC).to_string()).collect::<Vec<_>>().join("/") ) };
+        let canonical_path = if key.is_empty() { format!("/{}/", self.bucket) } else { format!("/{}/{}", self.bucket, key.split('/').map(|part| utf8_percent_encode(part, NON_ALPHANUMERIC).to_string()).collect::<Vec<_>>().join("/") ) };
         let mut q = query.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect::<BTreeMap<_, _>>();
         q.insert("x-oss-credential".into(), credential.clone());
         q.insert("x-oss-date".into(), timestamp.clone());
@@ -101,7 +102,7 @@ impl OssServer {
         let signed_headers = "host";
         let canonical_headers = format!("host:{}\n", host);
         let payload_hash = "UNSIGNED-PAYLOAD";
-        let canonical_request = format!("{}\n{}\n{}\n{}\n{}\n{}", method, path, query_string, canonical_headers, signed_headers, payload_hash);
+        let canonical_request = format!("{}\n{}\n{}\n{}\n{}\n{}", method, canonical_path, query_string, canonical_headers, signed_headers, payload_hash);
         let hashed_request = hex::encode(Sha256::digest(canonical_request.as_bytes()));
         let scope = format!("{}/{}/oss/aliyun_v4_request", date, region);
         let string_to_sign = format!("OSS4-HMAC-SHA256\n{}\n{}\n{}", timestamp, scope, hashed_request);

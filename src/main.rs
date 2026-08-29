@@ -90,7 +90,7 @@ fn serve(args: Args, running: Arc<AtomicBool>) -> Result<Vec<JoinHandle<()>>> {
     let addrs = args.addrs.clone();
     let port = args.port;
     let tls_config = (args.tls_cert.clone(), args.tls_key.clone());
-    let server_handle = if std::env::var_os("DUFS_OSS_BUCKET").is_some() {
+    let server_handle = if std::env::var_os("DUFS_OSS_BUCKET").or_else(|| std::env::var_os("OSS_BUCKET")).is_some() {
         Arc::new(App::Oss(Arc::new(OssServer::from_env()?)))
     } else {
         Arc::new(App::Local(Arc::new(Server::init(args, running)?)))

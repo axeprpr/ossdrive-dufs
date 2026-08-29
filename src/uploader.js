@@ -88,7 +88,7 @@ class Uploader {
                 fetch('/api/upload-url', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: this.url.replace(/^\//, '') }),
+                    body: JSON.stringify({ name: decodeURIComponent(this.url.replace(/^\//, '')) }),
                 }).then(async response => {
                     if (!response.ok) throw new Error((await response.text()) || response.statusText);
                     return response.json();

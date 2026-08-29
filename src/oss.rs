@@ -5,7 +5,7 @@ use chrono::{Datelike, Timelike, Utc};
 use hmac::{Hmac, Mac};
 use hyper::{body::Incoming, header, Method, Request, StatusCode};
 use http_body_util::{BodyExt, Full};
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS, NON_ALPHANUMERIC};
 use reqwest::Client;
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
@@ -14,6 +14,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use crate::server::Response;
 
 type HmacSha1 = Hmac<Sha1>;
+const OSS_ENCODE_SET: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`').add(b'#').add(b'?').add(b'/').add(b':').add(b'=').add(b'&').add(b'+');
 
 pub struct OssServer {
     client: Client,
@@ -94,7 +95,7 @@ impl OssServer {
         q.insert("x-oss-expires".into(), "900".into());
         q.insert("x-oss-signature-version".into(), "OSS4-HMAC-SHA256".into());
         q.insert("x-oss-additional-headers".into(), "host".into());
-        let query_string = q.iter().map(|(k, v)| format!("{}={}", utf8_percent_encode(k, NON_ALPHANUMERIC), utf8_percent_encode(v, NON_ALPHANUMERIC))).collect::<Vec<_>>().join("&");
+        let query_string = q.iter().map(|(k, v)| format!("{}={}", utf8_percent_encode(k, OSS_ENCODE_SET), utf8_percent_encode(v, OSS_ENCODE_SET))).collect::<Vec<_>>().join("&");
         let host = self.bucket_endpoint.trim_start_matches("https://").trim_start_matches("http://");
         let signed_headers = "host";
         let canonical_headers = format!("host:{}\n", host);

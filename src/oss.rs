@@ -44,7 +44,8 @@ impl OssServer {
     async fn handle(&self, req: Request<Incoming>) -> Result<Response> {
         if req.method() == Method::OPTIONS { return Ok(response(StatusCode::NO_CONTENT, Bytes::new())); }
         let path = req.uri().path().trim_matches('/');
-        if path.is_empty() { return Ok(self.index_page()); }
+        let wants_json = req.uri().query().is_some_and(|q| q.split('&').any(|v| v == "json"));
+        if (req.method() == Method::GET || req.method() == Method::HEAD) && !wants_json && (path.is_empty() || req.uri().path().ends_with('/')) { return Ok(self.index_page()); }
         if path.contains("assets/index-") && path.ends_with(".js") { return Ok(asset_response("application/javascript; charset=UTF-8", include_str!("../assets/index.js"))); }
         if path.contains("assets/index-") && path.ends_with(".css") { return Ok(asset_response("text/css; charset=UTF-8", include_str!("../assets/index.css"))); }
         if path == "health" || path == "__dufs__/health" { return Ok(json_response(StatusCode::OK, br#"{"status":"ok"}"#)); }
@@ -53,8 +54,7 @@ impl OssServer {
         if req.method() == Method::DELETE { if !self.authorized(&req) { return Ok(unauthorized()); }; return self.delete(path).await; }
         if req.method().as_str() == "MOVE" { if !self.authorized(&req) { return Ok(unauthorized()); }; return self.move_object(path, req.headers().get("destination").and_then(|v| v.to_str().ok())).await; }
         if req.method() == Method::GET || req.method() == Method::HEAD {
-            if req.uri().query().is_some_and(|q| q.split('&').any(|v| v == "json")) { return self.list(path).await; }
-            if path.is_empty() || path.ends_with('/') { return self.list(path).await; }
+            if wants_json { return self.list(path).await; }
             return Ok(redirect_response(self.signed_url(&self.key(path)?, "GET")?));
         }
         Ok(error_response(StatusCode::METHOD_NOT_ALLOWED, "OSS mode requires /api/upload-url for uploads"))
@@ -62,7 +62,7 @@ impl OssServer {
 
     fn index_page(&self) -> Response {
         let mut html = include_str!("../assets/index.html").replace("__ASSETS_PREFIX__", "/");
-        let data = base64::engine::general_purpose::STANDARD.encode(r#"{"href":"/","kind":"Dir","uri_prefix":"/","allow_upload":true,"allow_delete":true,"auth":false,"user":null,"editable":false}"#);
+        let data = base64::engine::general_purpose::STANDARD.encode("null");
         html = html.replace("__INDEX_DATA__", &data);
         let mut r = response(StatusCode::OK, Bytes::from(html));
         r.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static("text/html; charset=UTF-8")); r

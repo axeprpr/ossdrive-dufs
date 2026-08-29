@@ -46,8 +46,8 @@ impl OssServer {
         let path = req.uri().path().trim_matches('/');
         let wants_json = req.uri().query().is_some_and(|q| q.split('&').any(|v| v == "json"));
         if (req.method() == Method::GET || req.method() == Method::HEAD) && !wants_json && (path.is_empty() || req.uri().path().ends_with('/')) { return Ok(self.index_page()); }
-        if (path == "index.js" || path.contains("assets/index-") && path.ends_with(".js")) { return Ok(asset_response("application/javascript; charset=UTF-8", include_str!("../assets/index.js"))); }
-        if (path == "index.css" || path.contains("assets/index-") && path.ends_with(".css")) { return Ok(asset_response("text/css; charset=UTF-8", include_str!("../assets/index.css"))); }
+        if (path == "index.js" || path.ends_with("/index.js") || path.contains("assets/index-") && path.ends_with(".js")) { return Ok(asset_response("application/javascript; charset=UTF-8", include_str!("../assets/index.js"))); }
+        if (path == "index.css" || path.ends_with("/index.css") || path.contains("assets/index-") && path.ends_with(".css")) { return Ok(asset_response("text/css; charset=UTF-8", include_str!("../assets/index.css"))); }
         if path == "health" || path == "__dufs__/health" { return Ok(json_response(StatusCode::OK, br#"{"status":"ok"}"#)); }
         if req.method().as_str() == "CHECKAUTH" { return Ok(if self.authorized(&req) { response(StatusCode::OK, Bytes::new()) } else { unauthorized() }); }
         if path == "api/upload-url" { if !self.authorized(&req) { return Ok(unauthorized()); }; return self.upload_url(req).await; }
@@ -61,7 +61,8 @@ impl OssServer {
     }
 
     fn index_page(&self) -> Response {
-        let mut html = include_str!("../assets/index.html").replace("__ASSETS_PREFIX__", "/");
+        let assets_prefix = format!("/__dufs_v{}__/", env!("CARGO_PKG_VERSION"));
+        let mut html = include_str!("../assets/index.html").replace("__ASSETS_PREFIX__", &assets_prefix).replace("window.__DUFS_PREFIX__=\"/\"", &format!("window.__DUFS_PREFIX__=\"{}\"", assets_prefix));
         let data = base64::engine::general_purpose::STANDARD.encode("null");
         html = html.replace("__INDEX_DATA__", &data);
         let mut r = response(StatusCode::OK, Bytes::from(html));

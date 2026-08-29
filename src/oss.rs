@@ -44,6 +44,9 @@ impl OssServer {
     async fn handle(&self, req: Request<Incoming>) -> Result<Response> {
         if req.method() == Method::OPTIONS { return Ok(response(StatusCode::NO_CONTENT, Bytes::new())); }
         let path = req.uri().path().trim_matches('/');
+        if path.is_empty() { return Ok(self.index_page()); }
+        if path.contains("assets/index-") && path.ends_with(".js") { return Ok(asset_response("application/javascript; charset=UTF-8", include_str!("../assets/index.js"))); }
+        if path.contains("assets/index-") && path.ends_with(".css") { return Ok(asset_response("text/css; charset=UTF-8", include_str!("../assets/index.css"))); }
         if path == "health" || path == "__dufs__/health" { return Ok(json_response(StatusCode::OK, br#"{"status":"ok"}"#)); }
         if req.method().as_str() == "CHECKAUTH" { return Ok(if self.authorized(&req) { response(StatusCode::OK, Bytes::new()) } else { unauthorized() }); }
         if path == "api/upload-url" { if !self.authorized(&req) { return Ok(unauthorized()); }; return self.upload_url(req).await; }
@@ -55,6 +58,14 @@ impl OssServer {
             return Ok(redirect_response(self.signed_url(&self.key(path)?, "GET")?));
         }
         Ok(error_response(StatusCode::METHOD_NOT_ALLOWED, "OSS mode requires /api/upload-url for uploads"))
+    }
+
+    fn index_page(&self) -> Response {
+        let mut html = include_str!("../assets/index.html").replace("__ASSETS_PREFIX__", "/");
+        let data = base64::engine::general_purpose::STANDARD.encode(r#"{"href":"/","kind":"Dir","uri_prefix":"/","allow_upload":true,"allow_delete":true,"auth":false,"user":null,"editable":false}"#);
+        html = html.replace("__INDEX_DATA__", &data);
+        let mut r = response(StatusCode::OK, Bytes::from(html));
+        r.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static("text/html; charset=UTF-8")); r
     }
 
     fn authorized(&self, req: &Request<Incoming>) -> bool { self.user.as_ref().map(|(u,p)| req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).is_some_and(|v| v == format!("Basic {}", STANDARD.encode(format!("{}:{}",u,p)) ))).unwrap_or(true) }
@@ -129,6 +140,7 @@ fn hmac_sha256(key: &[u8], value: &[u8]) -> Vec<u8> {
     Sha256::digest(&output).to_vec()
 }
 fn response(status: StatusCode, body: Bytes) -> Response { let mut response=Response::new(Full::new(body).map_err(|e| anyhow!(e)).boxed()); *response.status_mut()=status; response }
+fn asset_response(content_type: &'static str, body: &str) -> Response { let mut r=response(StatusCode::OK, Bytes::from(body.to_string())); r.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static(content_type)); r }
 fn json_response(status: StatusCode, body: &[u8]) -> Response { let mut r=response(status,Bytes::copy_from_slice(body)); r.headers_mut().insert(header::CONTENT_TYPE,header::HeaderValue::from_static("application/json")); r }
 fn error_response(status: StatusCode, message: &str) -> Response { json_response(status,serde_json::json!({"error":message}).to_string().as_bytes()) }
 fn unauthorized() -> Response { let mut r=error_response(StatusCode::UNAUTHORIZED,"authentication required"); r.headers_mut().insert(header::WWW_AUTHENTICATE,header::HeaderValue::from_static("Basic realm=ossdrive")); r }
